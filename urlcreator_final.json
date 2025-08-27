@@ -1,0 +1,188 @@
+{
+  "name": "urlcreator",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "c4538020-3266-4cd6-be78-27536937de40",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "range": "Videos!A1:H999",
+        "options": {}
+      },
+      "id": "5c0a5991-2982-4333-be3e-25e912ab9599",
+      "name": "Read All Videos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const WEBHOOK_BASE_URL = \"https://sairamincubation.app.n8n.cloud/webhook/track-scan\";\nconst out = [];\n\n// Get all input items\nconst inputItems = $input.all();\nconsole.log(`=== URL CREATOR WORKFLOW STARTED ===`);\nconsole.log(`Total input items from Google Sheets: ${inputItems.length}`);\n\n// Debug: Show sample input structure\nconsole.log(\"First 2 items structure:\", JSON.stringify(inputItems.slice(0, 2), null, 2));\n\nfor (let i = 0; i < inputItems.length; i++) {\n  const item = inputItems[i];\n  const row = item.json || {};\n  const keys = Object.keys(row);\n  \n  console.log(`\\n--- Processing Row ${i} ---`);\n  console.log(`Available columns:`, keys);\n  \n  // Read ID from column A (first column)\n  const id = row.ID ?? row.Id ?? row[keys[0]] ?? \"\";\n  \n  // Skip header row - be more flexible with detection\n  if (String(id).trim().toLowerCase() === 'id' || String(id).trim() === 'ID') {\n    console.log(`\u2713 Skipping header row with ID: \"${id}\"`);\n    continue;\n  }\n  \n  // More comprehensive YouTube URL detection\n  let youtubeUrlRaw = row[\"YouTubeURL\"] ?? \n                     row[\"YouTube URL\"] ?? \n                     row[\"youtubeUrl\"] ?? \n                     row[\"youtube_url\"] ??\n                     row[\"Youtube URL\"] ??\n                     row[\"YOUTUBEURL\"] ??\n                     \"\";\n  \n  // If not found by name, try by position (usually column C = index 2)\n  if (!youtubeUrlRaw && keys.length > 2) {\n    youtubeUrlRaw = row[keys[2]] || \"\";\n  }\n  \n  console.log(`ID: \"${id}\"`);\n  console.log(`YouTube URL (raw): \"${youtubeUrlRaw}\"`);\n  \n  // Skip rows without valid ID\n  if (!id || String(id).trim() === \"\") {\n    console.log(`\u2717 Skipping row ${i} - No valid ID found`);\n    continue;\n  }\n  \n  // Process the YouTube URL\n  let clean = String(youtubeUrlRaw || \"\").trim();\n  \n  if (clean && clean !== \"\" && clean.toLowerCase() !== \"youtubeurl\") {\n    console.log(`\u2713 Processing YouTube URL: ${clean}`);\n    \n    // Normalize different YouTube URL formats\n    if (clean.includes(\"youtu.be/\")) {\n      const vid = clean.split(\"youtu.be/\")[1].split(/[?&#]/)[0];\n      clean = \"https://youtube.com/watch?v=\" + vid;\n      console.log(`  \u2192 Converted youtu.be to: ${clean}`);\n    } else if (clean.includes(\"shorts/\")) {\n      const vid = clean.split(\"shorts/\")[1].split(/[?&#]/)[0];\n      clean = \"https://youtube.com/watch?v=\" + vid;\n      console.log(`  \u2192 Converted shorts to: ${clean}`);\n    } else if (clean.includes(\"watch?v=\")) {\n      const vid = clean.split(\"watch?v=\")[1].split(/[?&#]/)[0];\n      clean = \"https://youtube.com/watch?v=\" + vid;\n      console.log(`  \u2192 Standardized watch URL to: ${clean}`);\n    } else if (clean.includes(\"playlist?list=\")) {\n      console.log(`  \u2192 Keeping playlist URL: ${clean}`);\n    } else if (clean.startsWith(\"http\")) {\n      console.log(`  \u2192 Keeping URL as-is: ${clean}`);\n    } else {\n      console.log(`  \u26a0\ufe0f Unknown URL format, keeping as-is: ${clean}`);\n    }\n  } else {\n    console.log(`No YouTube URL found for ID: \"${id}\"`);\n    clean = \"\"; // Ensure clean is empty string, not undefined\n  }\n  \n  // Generate redirect URL and QR code\n  const redirectUrl = clean && clean !== \"\"\n    ? WEBHOOK_BASE_URL + \"?id=\" + encodeURIComponent(String(id).trim()) + \"&target=\" + encodeURIComponent(clean)\n    : \"\";\n    \n  const qrCodeUrl = redirectUrl\n    ? \"https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data=\" + encodeURIComponent(redirectUrl)\n    : \"\";\n  \n  console.log(`Results for ID \"${id}\":`, {\n    hasYouTubeURL: !!clean,\n    redirectUrl: redirectUrl ? \"\u2713 CREATED\" : \"\u2717 EMPTY (no YouTube URL)\",\n    qrCode: qrCodeUrl ? \"\u2713 CREATED\" : \"\u2717 EMPTY (no redirect URL)\"\n  });\n  \n  // CRITICAL FIX: Match exact column names from Google Sheets update node\n  const outputItem = {\n    json: {\n      ID: String(id).trim(),                    // Match exactly\n      \"Redirect URL\": redirectUrl,              // NO SPACE - matches your update node\n      \"QR Code URL\": qrCodeUrl                  // NO SPACE - matches your update node\n    }\n  };\n  \n  console.log(`Adding to output:`, JSON.stringify(outputItem, null, 2));\n  out.push(outputItem);\n}\n\nconsole.log(`\\n=== WORKFLOW SUMMARY ===`);\nconsole.log(`Total rows processed: ${inputItems.length}`);\nconsole.log(`Total output items: ${out.length}`);\nconsole.log(`Items with redirect URLs: ${out.filter(item => item.json[\"Redirect URL\"]).length}`);\nconsole.log(`Items with QR codes: ${out.filter(item => item.json[\"QR Code URL\"]).length}`);\n\n// Show what we're sending to Google Sheets update\nconsole.log(\"\\n=== OUTPUT SAMPLE FOR GOOGLE SHEETS ===\");\nout.slice(0, 3).forEach((item, index) => {\n  console.log(`Output ${index}:`, JSON.stringify(item.json, null, 2));\n});\n\nif (out.length === 0) {\n  console.error(\"\\n\u274c ERROR: No valid rows to update!\");\n  console.error(\"Possible issues:\");\n  console.error(\"1. All rows were skipped (no valid IDs)\");\n  console.error(\"2. Wrong column names\");\n  console.error(\"3. Empty sheet or wrong range\");\n  console.error(\"\\nCheck the input data above to debug.\");\n} else {\n  console.log(`\\n\u2705 Ready to update ${out.length} rows in Google Sheets`);\n}\n\nconsole.log(`=== URL CREATOR WORKFLOW END ===`);\nreturn out;"
+      },
+      "id": "1227f85e-70a3-462e-962b-3fd25e02429d",
+      "name": "Generate URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.ID }}",
+            "Redirect URL": "={{ $json['Redirect URL'] }}",
+            "QR Code URL": "={{ $json['QR Code URL'] }}"
+          },
+          "matchingColumns": [
+            "ID"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "YouTubeURL",
+              "displayName": "YouTubeURL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Redirect URL",
+              "displayName": "Redirect URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "QR Code URL",
+              "displayName": "QR Code URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Click Count",
+              "displayName": "Click Count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        256,
+        48
+      ],
+      "id": "d8944418-c788-4599-9c9f-29e52f5c0aa4",
+      "name": "Update Videos Sheet"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read All Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Videos": {
+      "main": [
+        [
+          {
+            "node": "Generate URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate URLs": {
+      "main": [
+        [
+          {
+            "node": "Update Videos Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c90c233e-e5cc-45dc-900d-338156310643",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fdbbf1469f1f35114f09a0cb2b4d1b735fcac5df1e40b724074314e37d599b6d"
+  },
+  "id": "8tVUOmvuZvHOcrbf",
+  "tags": []
+}
