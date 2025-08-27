@@ -1,0 +1,328 @@
+{
+  "name": "finalcloud",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "track-scan",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4b74d20a-72d6-4ab9-8a59-5f77e0eefefe",
+      "name": "Webhook - QR Scan",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "1f7c18b1-d1f6-4ae1-8178-4278d01e909b"
+    },
+    {
+      "parameters": {
+        "jsCode": "const WEBHOOK_BASE_URL = \"https://sanjay22.app.n8n.cloud/webhook/track-scan\";\n\nconst inputJson = $input.first()?.json || { query: {}, headers: {} };\n\nconst id = inputJson.query?.id || \"unknown\";\nconst targetParam = inputJson.query?.target || \"\";\n\nconsole.log(\"=== DEBUG START ===\");\nconsole.log(\"ID:\", id);\nconsole.log(\"Raw targetParam:\", targetParam);\n\n// Try decoding\nlet decoded = \"\";\ntry { \n  decoded = decodeURIComponent(targetParam); \n  console.log(\"Decoded successfully:\", decoded);\n} catch (error) { \n  decoded = targetParam; \n  console.log(\"Decode failed, using raw:\", decoded);\n}\n\n// Skip normalization for now - just use the decoded URL directly\nlet finalTarget = decoded || \"https://www.youtube.com\";\nconsole.log(\"Final target URL:\", finalTarget);\n\nconst headers = inputJson.headers || {};\nconst userAgent = headers[\"user-agent\"] || \"Unknown\";\nconst ip = headers[\"x-forwarded-for\"] || headers[\"x-real-ip\"] || \"Unknown\";\n\nconst structuredUrl = `${WEBHOOK_BASE_URL}?id=${encodeURIComponent(id)}&target=${encodeURIComponent(decoded)}`;\n\nconst clickData = {\n  videoId: id,\n  targetUrl: finalTarget,\n  structuredUrl,\n  timestamp: new Date().toISOString(),\n  date: new Date().toLocaleDateString(),\n  time: new Date().toLocaleTimeString(),\n  userAgent,\n  ip\n};\n\nconsole.log(\"=== DEBUG END ===\");\nreturn [{ json: clickData }];"
+      },
+      "id": "ec3cfc6c-83db-472f-a3e2-b8ef8a716a7f",
+      "name": "Process Click Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "={{ $node['Process Click Data'].json.targetUrl }}",
+        "options": {
+          "responseCode": 302,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-cache, no-store, must-revalidate"
+              }
+            ]
+          }
+        }
+      },
+      "id": "6bf0f40b-b83c-4970-b4f8-0465373d7ad3",
+      "name": "Redirect to YouTube",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "1ukuU9AEoyhHP_fFsVqfVi9H-eLdXcOyy_jInJzgVLQw",
+        "range": "=Videos!A2:F",
+        "options": {}
+      },
+      "id": "21acb135-b262-450b-9120-ddcc7f3c5731",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [
+        208,
+        208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YhVsyZpxrl2wLJsR",
+          "name": "Google Sheets account 2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1ukuU9AEoyhHP_fFsVqfVi9H-eLdXcOyy_jInJzgVLQw",
+          "mode": "list",
+          "cachedResultName": "study",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ukuU9AEoyhHP_fFsVqfVi9H-eLdXcOyy_jInJzgVLQw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2139833221,
+          "mode": "list",
+          "cachedResultName": "Videos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ukuU9AEoyhHP_fFsVqfVi9H-eLdXcOyy_jInJzgVLQw/edit#gid=2139833221"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "=ID",
+              "lookupValue": "={{ $json.videoId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        400,
+        208
+      ],
+      "id": "9d8baa84-f73d-4b66-8004-2f5d55dfa243",
+      "name": "Get Existing Row",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YhVsyZpxrl2wLJsR",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from the \"Get Existing Row\" node and Process Click Data\nconst rowData = $node[\"Get Existing Row\"].json;  \nconst clickData = $node[\"Process Click Data\"].json;\n\n// Get current click count from the row (handle empty values)\nconst currentCount = parseInt(rowData[\"Click Count\"]) || 0;\nconst newCount = currentCount + 1;\n\nconsole.log(`Video ${clickData.videoId}: ${currentCount} → ${newCount}`);\n\n// Return ONLY the data needed for update\nreturn [{\n  json: {\n    ID: rowData.ID,\n    \"Click Count\": newCount\n  }\n}];"
+      },
+      "id": "663b850b-40ed-4c87-94e0-cb8b85b0ef65",
+      "name": "Increment Count",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1ukuU9AEoyhHP_fFsVqfVi9H-eLdXcOyy_jInJzgVLQw",
+          "mode": "list",
+          "cachedResultName": "study",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ukuU9AEoyhHP_fFsVqfVi9H-eLdXcOyy_jInJzgVLQw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2139833221,
+          "mode": "list",
+          "cachedResultName": "Videos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ukuU9AEoyhHP_fFsVqfVi9H-eLdXcOyy_jInJzgVLQw/edit#gid=2139833221"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.ID }}",
+            "Click Count": "={{ $json['Click Count'] }}"
+          },
+          "matchingColumns": [
+            "ID"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "YouTubeURL",
+              "displayName": "YouTubeURL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Redirect URL",
+              "displayName": "Redirect URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "QR Code URL",
+              "displayName": "QR Code URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Click Count",
+              "displayName": "Click Count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        800,
+        208
+      ],
+      "id": "5ef26b12-f0cc-45c4-ad8a-5362bc1d5667",
+      "name": "Update Click Count",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YhVsyZpxrl2wLJsR",
+          "name": "Google Sheets account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - QR Scan": {
+      "main": [
+        [
+          {
+            "node": "Process Click Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Click Data": {
+      "main": [
+        [
+          {
+            "node": "Redirect to YouTube",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Row": {
+      "main": [
+        [
+          {
+            "node": "Increment Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Increment Count": {
+      "main": [
+        [
+          {
+            "node": "Update Click Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "d63ceb60-4fbf-4485-b2cd-f283e2ead9c0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fdbbf1469f1f35114f09a0cb2b4d1b735fcac5df1e40b724074314e37d599b6d"
+  },
+  "id": "xL9yzyrTj4yx4O0l",
+  "tags": []
+}
